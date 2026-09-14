@@ -1,0 +1,73 @@
+Lumen for Google Play
+=====================
+
+Package name: app.lumen.scanner
+Version: 1.0.0 (versionCode 1)
+Upload key alias: lumen
+Keystore file: stored privately outside this project
+Keystore password: stored privately; never commit or document it here
+Key password: stored privately; never commit or document it here
+
+What to upload
+--------------
+Upload lumen-release.aab in Google Play Console → Your app → Production
+(or Internal testing first).
+
+lumen-release.apk is only for installing on your own phone to try it.
+Do not upload the APK to Play — Play wants the .aab.
+
+Store listing
+-------------
+App name: Lumen
+Short description:
+Scan pages with your camera. Clean PDFs from photos — no hardware scanner.
+
+Full description:
+Lumen turns your phone into a document scanner.
+
+• Photograph a page with the camera
+• Import photos or a PDF
+• Auto-detect edges, flatten perspective, and clean the page
+• Enhance, black-and-white, grayscale, or photo
+• Export a multi-page PDF or a single image
+
+Pages are processed on your device. Lumen does not require an account.
+
+Graphics
+--------
+play-icon-512.png — high-res icon
+play-feature-1024x500.png — feature graphic (required)
+
+Privacy policy URL
+------------------
+After you publish the Lumen website from Grok, use:
+
+  https://YOUR-APP-HOST/privacy
+
+Play Console will not accept the listing without a public privacy policy URL.
+
+Content rating
+--------------
+Complete Google’s questionnaire. This app is a productivity scanner,
+not a social network, and does not share user content online.
+
+Data safety
+-----------
+No data is collected or shared by Lumen servers. Camera and files are
+used only on-device to create scans you save or share.
+
+Keep the private upload key and its password secure. Release builds read them
+from LUMEN_KEYSTORE_FILE, LUMEN_KEYSTORE_PASS, and LUMEN_KEY_PASS.
+
+Content rating
+--------------
+Complete Google’s questionnaire. This app is a productivity scanner,
+not a social network, and does not share user content online.
+
+Data safety
+-----------
+No data is collected or shared by Lumen servers. Camera and files are
+used only on-device to create scans you save or share.
+
+Keep the private upload key and its password secure. You need the same upload
+key for future updates unless Google Play approves an upload-key reset.

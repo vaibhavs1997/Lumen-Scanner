@@ -1,0 +1,108 @@
+plugins {
+    id "com.android.application"
+}
+
+def webRootDir = file("${projectDir}/../..")
+
+tasks.register("buildNativeWeb", Exec) {
+    group = "build"
+    description = "Builds the current scanner web UI into the Android assets directory."
+    workingDir webRootDir
+    commandLine System.getProperty("os.name").toLowerCase().contains("windows")
+        ? ["cmd", "/c", "npm", "run", "build:native"]
+        : ["npm", "run", "build:native"]
+
+    inputs.files(
+        fileTree("${webRootDir}/src"),
+        fileTree("${webRootDir}/native"),
+        file("${webRootDir}/package.json"),
+        file("${webRootDir}/package-lock.json"),
+        file("${webRootDir}/vite.native.config.ts"),
+        file("${webRootDir}/tsconfig.json"),
+    )
+    outputs.dir("${projectDir}/src/main/assets/www")
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("buildNativeWeb")
+}
+
+def keystoreFilePath = System.getenv("LUMEN_KEYSTORE_FILE")
+def keystorePass = System.getenv("LUMEN_KEYSTORE_PASS")
+def keyAlias = System.getenv("LUMEN_KEY_ALIAS") ?: "lumen"
+def keyPass = System.getenv("LUMEN_KEY_PASS")
+def releaseSigningConfigured =
+    keystoreFilePath != null && !keystoreFilePath.isBlank() &&
+    keystorePass != null && !keystorePass.isBlank() &&
+    keyPass != null && !keyPass.isBlank() &&
+    file(keystoreFilePath).isFile()
+
+android {
+    namespace "app.lumen.scanner"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "app.lumen.scanner"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    signingConfigs {
+        release {
+            if (releaseSigningConfigured) {
+                storeFile file(keystoreFilePath)
+                storePassword keystorePass
+                keyAlias keyAlias
+                keyPassword keyPass
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            if (releaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// Never run release work or leave an unsigned artifact that looks production-ready.
+gradle.taskGraph.whenReady { taskGraph ->
+    def hasReleaseTask = taskGraph.allTasks.any { task ->
+        task.name == "assembleRelease" ||
+        task.name == "packageRelease" ||
+        task.name == "bundleRelease"
+    }
+    if (hasReleaseTask && !releaseSigningConfigured) {
+        throw new GradleException(
+            "Release signing is not configured. Set LUMEN_KEYSTORE_FILE, " +
+            "LUMEN_KEYSTORE_PASS, and LUMEN_KEY_PASS in your private environment."
+        )
+    }
+}
+
+dependencies {
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation "androidx.webkit:webkit:1.12.1"
+    implementation "androidx.activity:activity:1.9.3"
+}
+
+configurations.configureEach {
+    exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7"
+    exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"
+}
