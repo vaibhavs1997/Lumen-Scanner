@@ -1,12 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@fontsource-variable/fraunces";
+@import "@fontsource-variable/plus-jakarta-sans";
 
 @source "./**/*.{ts,tsx}";
 @source "../native/**/*.{ts,tsx}";
 
 @theme {
-  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces Variable", ui-serif, Georgia, serif;
 
   --color-background: #09090b;
   --color-foreground: #f4f1ea;

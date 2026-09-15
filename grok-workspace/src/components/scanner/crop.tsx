@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { clamp01 } from "@/lib/scan/geometry";
+import { clamp01, isValidNormalizedQuad } from "@/lib/scan/geometry";
 import type { Quad } from "@/lib/scan/types";
 
 type CropProps = {
@@ -34,7 +34,7 @@ export function CropOverlay({ src, corners, onChange }: CropProps) {
       const y = clamp01((e.clientY - rect.top) / rect.height);
       const next = cornersRef.current.slice() as Quad;
       next[index] = { x, y };
-      onChange(next);
+      if (isValidNormalizedQuad(next)) onChange(next);
     };
 
     const up = () => {

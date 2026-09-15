@@ -29,7 +29,7 @@ tasks.named("preBuild").configure {
 
 def keystoreFilePath = System.getenv("LUMEN_KEYSTORE_FILE")
 def keystorePass = System.getenv("LUMEN_KEYSTORE_PASS")
-def keyAlias = System.getenv("LUMEN_KEY_ALIAS") ?: "lumen"
+def releaseKeyAlias = System.getenv("LUMEN_KEY_ALIAS") ?: "lumen"
 def keyPass = System.getenv("LUMEN_KEY_PASS")
 def releaseSigningConfigured =
     keystoreFilePath != null && !keystoreFilePath.isBlank() &&
@@ -38,46 +38,46 @@ def releaseSigningConfigured =
     file(keystoreFilePath).isFile()
 
 android {
-    namespace "app.lumen.scanner"
-    compileSdk 35
+    namespace = "app.lumen.scanner"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId "app.lumen.scanner"
-        minSdk 26
-        targetSdk 35
-        versionCode 1
-        versionName "1.0.0"
+        applicationId = "app.lumen.scanner"
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
     signingConfigs {
         release {
             if (releaseSigningConfigured) {
-                storeFile file(keystoreFilePath)
-                storePassword keystorePass
-                keyAlias keyAlias
-                keyPassword keyPass
+                storeFile = file(keystoreFilePath)
+                storePassword = keystorePass
+                keyAlias = releaseKeyAlias
+                keyPassword = keyPass
             }
         }
     }
 
     buildTypes {
         release {
-            minifyEnabled true
-            shrinkResources true
+            minifyEnabled = true
+            shrinkResources = true
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             if (releaseSigningConfigured) {
-                signingConfig signingConfigs.release
+                signingConfig = signingConfigs.release
             }
         }
         debug {
-            applicationIdSuffix ".debug"
-            versionNameSuffix "-debug"
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
         }
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 }
 
@@ -100,6 +100,7 @@ dependencies {
     implementation "androidx.appcompat:appcompat:1.7.0"
     implementation "androidx.webkit:webkit:1.12.1"
     implementation "androidx.activity:activity:1.9.3"
+    testImplementation "junit:junit:4.13.2"
 }
 
 configurations.configureEach {

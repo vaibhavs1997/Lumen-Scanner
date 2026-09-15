@@ -58,7 +58,11 @@ export function CameraOverlay({ onPickPhotos }: { onPickPhotos: () => void }) {
         }
         streamRef.current = stream;
         const video = videoRef.current;
-        if (!video) return;
+        if (!video) {
+          stopStream(stream);
+          streamRef.current = null;
+          return;
+        }
         video.srcObject = stream;
         await video.play();
         await waitForFirstFrame(video);
@@ -75,10 +79,18 @@ export function CameraOverlay({ onPickPhotos }: { onPickPhotos: () => void }) {
           setTorchSupported(false);
         }
         setReady(true);
-      } catch {
+      } catch (error) {
+        stopStream(streamRef.current);
+        streamRef.current = null;
+        if (videoRef.current) videoRef.current.srcObject = null;
         if (!cancelled) {
+          const permissionDenied =
+            error instanceof DOMException &&
+            (error.name === "NotAllowedError" || error.name === "SecurityError");
           setError(
-            "Camera permission was blocked. Choose a photo instead, or allow the camera and try again.",
+            permissionDenied
+              ? "Camera permission was blocked. Choose a photo instead, or allow the camera and try again."
+              : "The camera preview could not start. Close it and try again.",
           );
         }
       }

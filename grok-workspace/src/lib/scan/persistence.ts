@@ -85,7 +85,7 @@ export async function saveDraft(title: string, pages: ScanPage[]): Promise<void>
     return;
   }
   const db = await openDatabase();
-  if (!db) return;
+  if (!db) throw new Error("Draft storage is unavailable");
   try {
     const stored: StoredDraft = {
       version: 1,
@@ -114,7 +114,7 @@ export async function saveDraft(title: string, pages: ScanPage[]): Promise<void>
 
 export async function clearDraft(): Promise<void> {
   const db = await openDatabase();
-  if (!db) return;
+  if (!db) throw new Error("Draft storage is unavailable");
   try {
     const transaction = db.transaction(STORE_NAME, "readwrite");
     const completed = transactionDone(transaction);

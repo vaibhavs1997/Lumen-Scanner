@@ -36,7 +36,8 @@ type DownloadKind = "pdf" | "image";
 function safeFileBaseName(value: string): string {
   return value
     .replace(/\.(?:pdf|jpe?g)$/i, "")
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "")
+    .replace(/[<>:"/\\|?*]/g, "")
+    .replace(/\p{Cc}/gu, "")
     .replace(/[.\s]+$/g, "")
     .trim()
     .slice(0, 80);

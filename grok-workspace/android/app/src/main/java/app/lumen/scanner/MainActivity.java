@@ -23,6 +23,7 @@ import android.webkit.WebView;
 import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
@@ -32,6 +33,7 @@ import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -50,11 +52,11 @@ public class MainActivity extends AppCompatActivity {
   private static final long MAX_TRANSFER_BYTES = 128L * 1024L * 1024L;
   private static final long MAX_TOTAL_TRANSFER_BYTES = 192L * 1024L * 1024L;
   private static final int MAX_CONCURRENT_TRANSFERS = 2;
-
   private WebView webView;
   private ValueCallback<Uri[]> filePathCallback;
   private PermissionRequest pendingWebPermission;
-  private PendingSave pendingSave;
+  private final PendingTransferSlot<NativeTransfer> pendingSave =
+      new PendingTransferSlot<>(transfer -> transfer.id);
   private WebViewAssetLoader assetLoader;
   private final Map<String, NativeTransfer> transfers = new HashMap<>();
 
@@ -89,14 +91,6 @@ public class MainActivity extends AppCompatActivity {
       this.file = file;
       this.output = output;
       this.replyProxy = replyProxy;
-    }
-  }
-
-  private static final class PendingSave {
-    final NativeTransfer transfer;
-
-    PendingSave(NativeTransfer transfer) {
-      this.transfer = transfer;
     }
   }
 
@@ -140,14 +134,12 @@ public class MainActivity extends AppCompatActivity {
       registerForActivityResult(
           new ActivityResultContracts.RequestPermission(),
           granted -> {
-            PendingSave save = pendingSave;
-            pendingSave = null;
-            if (save == null) return;
+            NativeTransfer transfer = pendingSave.take();
+            if (transfer == null) return;
             if (granted) {
-              performSave(save.transfer);
+              performSave(transfer);
             } else {
-              failTransfer(
-                  save.transfer, "Storage permission is required to save on Android 8 or 9.");
+              failTransfer(transfer, "Storage permission is required to save on Android 8 or 9.");
             }
           });
 
@@ -156,6 +148,7 @@ public class MainActivity extends AppCompatActivity {
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
+    NativeFilePolicy.pruneShareCache(new File(getCacheDir(), "share"), 0);
     webView = findViewById(R.id.webview);
 
     assetLoader =
@@ -186,14 +179,17 @@ public class MainActivity extends AppCompatActivity {
         new WebViewClientCompat() {
           @Override
           public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-            if (!request.isForMainFrame()) return false;
             return !isTrustedAppUri(request.getUrl());
           }
 
           @Override
           public WebResourceResponse shouldInterceptRequest(
               WebView view, WebResourceRequest request) {
-            return assetLoader.shouldInterceptRequest(request.getUrl());
+            Uri uri = request.getUrl();
+            if (isTrustedAppUri(uri)) return assetLoader.shouldInterceptRequest(uri);
+            String scheme = uri == null ? null : uri.getScheme();
+            if ("blob".equalsIgnoreCase(scheme) || "data".equalsIgnoreCase(scheme)) return null;
+            return blockedWebResponse();
           }
         });
 
@@ -232,6 +228,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
     configureNativeBridge();
+    configureBackNavigation();
     webView.setBackgroundColor(0xFF09090B);
     webView.loadUrl(APP_HOST);
   }
@@ -246,6 +243,34 @@ public class MainActivity extends AppCompatActivity {
           if (!isMainFrame || !isTrustedAppUri(sourceOrigin)) return;
           handleNativeMessage(message, replyProxy);
         });
+  }
+
+  private void configureBackNavigation() {
+    getOnBackPressedDispatcher()
+        .addCallback(
+            this,
+            new OnBackPressedCallback(true) {
+              @Override
+              public void handleOnBackPressed() {
+                if (webView == null) {
+                  finishBackNavigation(this);
+                  return;
+                }
+                webView.evaluateJavascript(
+                    "Boolean(window.LumenHandleBack && window.LumenHandleBack())",
+                    handled -> {
+                      if ("true".equals(handled)) return;
+                      if (webView.canGoBack()) webView.goBack();
+                      else finishBackNavigation(this);
+                    });
+              }
+            });
+  }
+
+  private void finishBackNavigation(OnBackPressedCallback callback) {
+    callback.setEnabled(false);
+    getOnBackPressedDispatcher().onBackPressed();
+    callback.setEnabled(true);
   }
 
   private void handleNativeMessage(WebMessageCompat message, JavaScriptReplyProxy replyProxy) {
@@ -346,11 +371,10 @@ public class MainActivity extends AppCompatActivity {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
         && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
             != PackageManager.PERMISSION_GRANTED) {
-      if (pendingSave != null) {
+      if (!pendingSave.offer(transfer)) {
         failTransfer(transfer, "Finish the current save first.");
         return;
       }
-      pendingSave = new PendingSave(transfer);
       storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
       return;
     }
@@ -368,10 +392,12 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private void performShare(NativeTransfer transfer) {
+    File out = null;
     try {
       File dir = new File(getCacheDir(), "share");
       if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("share dir");
-      File out = new File(dir, safeName(transfer.id + "-" + transfer.filename));
+      NativeFilePolicy.pruneShareCache(dir, transfer.expectedSize);
+      out = new File(dir, safeName(transfer.id + "-" + transfer.filename));
       copyFile(transfer.file, new FileOutputStream(out));
       transfer.file.delete();
       Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".files", out);
@@ -383,12 +409,18 @@ public class MainActivity extends AppCompatActivity {
       startActivity(Intent.createChooser(send, transfer.title));
       reply(transfer.replyProxy, transfer.id, "complete", true, null);
     } catch (Exception e) {
+      if (out != null) out.delete();
       failTransfer(transfer, "Could not share the file.");
     }
   }
 
   private void abortTransfer(String id) {
     NativeTransfer transfer = transfers.remove(id);
+    if (transfer != null) {
+      cleanupTransfer(transfer);
+      return;
+    }
+    transfer = pendingSave.abort(id);
     if (transfer != null) cleanupTransfer(transfer);
   }
 
@@ -398,11 +430,12 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private int activeTransferCount() {
-    return transfers.size() + (pendingSave == null ? 0 : 1);
+    return transfers.size() + (pendingSave.peek() == null ? 0 : 1);
   }
 
   private long reservedTransferBytes() {
-    long total = pendingSave == null ? 0 : pendingSave.transfer.expectedSize;
+    NativeTransfer pending = pendingSave.peek();
+    long total = pending == null ? 0 : pending.expectedSize;
     for (NativeTransfer transfer : transfers.values()) {
       if (Long.MAX_VALUE - total < transfer.expectedSize) return Long.MAX_VALUE;
       total += transfer.expectedSize;
@@ -473,6 +506,16 @@ public class MainActivity extends AppCompatActivity {
         && uri.getUserInfo() == null;
   }
 
+  private static WebResourceResponse blockedWebResponse() {
+    return new WebResourceResponse(
+        "text/plain",
+        "UTF-8",
+        403,
+        "Blocked",
+        Collections.emptyMap(),
+        new ByteArrayInputStream(new byte[0]));
+  }
+
   private void writeToDownloads(File source, String filename, String mime) throws Exception {
     String name = safeName(filename);
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -537,25 +580,9 @@ public class MainActivity extends AppCompatActivity {
   protected void onDestroy() {
     for (NativeTransfer transfer : transfers.values()) cleanupTransfer(transfer);
     transfers.clear();
-    if (pendingSave != null) {
-      cleanupTransfer(pendingSave.transfer);
-      pendingSave = null;
-    }
+    NativeTransfer pending = pendingSave.take();
+    if (pending != null) cleanupTransfer(pending);
     super.onDestroy();
   }
 
-  @Override
-  public void onBackPressed() {
-    if (webView == null) {
-      super.onBackPressed();
-      return;
-    }
-    webView.evaluateJavascript(
-        "Boolean(window.LumenHandleBack && window.LumenHandleBack())",
-        handled -> {
-          if ("true".equals(handled)) return;
-          if (webView.canGoBack()) webView.goBack();
-          else super.onBackPressed();
-        });
-  }
 }

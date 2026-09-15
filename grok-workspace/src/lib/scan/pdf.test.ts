@@ -69,7 +69,7 @@ test("imports at most 30 PDF pages and releases every rendered page canvas", asy
     },
   };
   try {
-    const count = await processLoadedPdfPages(
+    const result = await processLoadedPdfPages(
       pdf as unknown as Parameters<typeof processLoadedPdfPages>[0],
       async (canvas, pageNumber, pageCount) => {
         assert.equal(pageCount, 30);
@@ -79,7 +79,7 @@ test("imports at most 30 PDF pages and releases every rendered page canvas", asy
         canvases.push(canvas as unknown as TestCanvas);
       },
     );
-    assert.equal(count, 30);
+    assert.deepEqual(result, { importedPages: 30, totalPages: 35, truncated: true });
     assert.deepEqual(rendered, Array.from({ length: 30 }, (_, index) => index + 1));
     assert.deepEqual(cleaned, rendered);
     assert.ok(canvases.every((canvas) => canvas.width === 1 && canvas.height === 1));

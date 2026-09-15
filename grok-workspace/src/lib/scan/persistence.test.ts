@@ -182,3 +182,16 @@ test("surfaces IndexedDB quota failures instead of reporting a successful save",
     URL.revokeObjectURL(original.resultUrl);
   });
 });
+
+test("reports unavailable draft storage instead of silently succeeding", async () => {
+  const previous = globalThis.indexedDB;
+  delete (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+  const original = samplePage();
+  try {
+    await assert.rejects(saveDraft("Unavailable", [original]), /storage is unavailable/);
+  } finally {
+    if (previous !== undefined) Object.assign(globalThis, { indexedDB: previous });
+    URL.revokeObjectURL(original.sourceUrl);
+    URL.revokeObjectURL(original.resultUrl);
+  }
+});

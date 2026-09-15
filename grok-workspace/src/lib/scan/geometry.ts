@@ -29,6 +29,42 @@ export function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
 }
 
+export function isValidNormalizedQuad(
+  quad: Quad,
+  minArea = 0.005,
+  minEdge = 0.02,
+): boolean {
+  if (
+    quad.some(
+      ({ x, y }) =>
+        !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1,
+    )
+  ) {
+    return false;
+  }
+
+  const [tl, tr, br, bl] = quad;
+  if (tl.x >= tr.x || bl.x >= br.x || tl.y >= bl.y || tr.y >= br.y) return false;
+  for (let index = 0; index < 4; index++) {
+    if (dist(quad[index]!, quad[(index + 1) % 4]!) < minEdge) return false;
+  }
+
+  let twiceArea = 0;
+  let winding = 0;
+  for (let index = 0; index < 4; index++) {
+    const previous = quad[index]!;
+    const current = quad[(index + 1) % 4]!;
+    const next = quad[(index + 2) % 4]!;
+    twiceArea += previous.x * current.y - current.x * previous.y;
+    const cross =
+      (current.x - previous.x) * (next.y - current.y) -
+      (current.y - previous.y) * (next.x - current.x);
+    if (cross <= 1e-6) return false;
+    winding += cross;
+  }
+  return winding > 0 && twiceArea / 2 >= minArea;
+}
+
 export function normalizeQuad(quad: Quad, width: number, height: number): Quad {
   return orderCorners(
     quad.map((p) => ({

@@ -3,10 +3,11 @@ import { CircleHelp } from "lucide-react";
 import { toast } from "sonner";
 import { CameraOverlay } from "@/components/scanner/camera";
 import { EditorOverlay } from "@/components/scanner/editor";
-import { FilePickers, useFilePickers } from "@/components/scanner/files";
+import { FilePickers } from "@/components/scanner/files";
 import { ingestFiles } from "@/components/scanner/ingest";
 import { ProcessingOverlay } from "@/components/scanner/processing";
 import { TabBar } from "@/components/scanner/tab-bar";
+import { useFilePickers } from "@/components/scanner/use-file-pickers";
 import { Workspace } from "@/components/scanner/workspace";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,11 +37,14 @@ export function ScannerApp() {
   const processingLabel = useScanner((s) => s.processingLabel);
   const error = useScanner((s) => s.error);
   const draftReady = useScanner((s) => s.draftReady);
+  const draftSaving = useScanner((s) => s.draftSaving);
+  const draftError = useScanner((s) => s.draftError);
   const setCameraOpen = useScanner((s) => s.setCameraOpen);
   const resetDocument = useScanner((s) => s.resetDocument);
   const closeEditor = useScanner((s) => s.closeEditor);
   const clearError = useScanner((s) => s.clearError);
   const hydrateDraft = useScanner((s) => s.hydrateDraft);
+  const retryDraft = useScanner((s) => s.retryDraft);
   const pickers = useFilePickers();
   const [dragging, setDragging] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -102,6 +106,7 @@ export function ScannerApp() {
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      if (backStateRef.current.busy) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       const files = e.clipboardData?.files;
@@ -153,12 +158,17 @@ export function ScannerApp() {
   function onDragOver(e: React.DragEvent) {
     if (![...e.dataTransfer.types].includes("Files")) return;
     e.preventDefault();
+    if (busy) {
+      e.dataTransfer.dropEffect = "none";
+      return;
+    }
     e.dataTransfer.dropEffect = "copy";
   }
 
   function onDragEnter(e: React.DragEvent) {
     if (![...e.dataTransfer.types].includes("Files")) return;
     e.preventDefault();
+    if (busy) return;
     setDragging(true);
   }
 
@@ -170,6 +180,7 @@ export function ScannerApp() {
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragging(false);
+    if (busy) return;
     if (e.dataTransfer.files.length) void ingestFiles(e.dataTransfer.files);
   }
 
@@ -215,6 +226,24 @@ export function ScannerApp() {
             </Button>
           </div>
         </header>
+
+        {draftError ? (
+          <div
+            role="alert"
+            className="mx-4 mb-3 flex items-center gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2"
+          >
+            <p className="min-w-0 flex-1 text-xs leading-relaxed text-foreground">{draftError}</p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={draftSaving}
+              onClick={retryDraft}
+            >
+              {draftSaving ? "Saving..." : "Retry"}
+            </Button>
+          </div>
+        ) : null}
 
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {!workspaceOpen && pages.length === 0 ? (

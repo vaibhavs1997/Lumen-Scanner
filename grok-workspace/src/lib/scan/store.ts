@@ -38,9 +38,13 @@ type ScannerState = {
   error: string | null;
   draftReady: boolean;
   draftHydrating: boolean;
+  draftDirty: boolean;
+  draftSaving: boolean;
+  draftError: string | null;
   setTitle: (title: string) => void;
   setCameraOpen: (open: boolean) => void;
   clearError: () => void;
+  retryDraft: () => void;
   hydrateDraft: () => Promise<void>;
   addFromCanvas: (
     canvas: HTMLCanvasElement,
@@ -85,6 +89,45 @@ function revokeEditorUrls(editor: Editor, pages: ScanPage[]) {
   }
 }
 
+function revokePage(page: ScanPage) {
+  revoke(page.sourceUrl);
+  revoke(page.resultUrl);
+}
+
+async function prepareAutoPage(
+  source: Blob | HTMLCanvasElement,
+): Promise<{ page: ScanPage; detected: boolean }> {
+  const canvas = await canvasFromSource(source);
+  const [sourceBlob, scanned] = await Promise.all([
+    canvasToBlob(canvas, "image/jpeg", 0.9),
+    autoScan(canvas, "enhance"),
+  ]);
+  let sourceUrl: string | undefined;
+  let resultUrl: string | undefined;
+  try {
+    sourceUrl = URL.createObjectURL(sourceBlob);
+    resultUrl = URL.createObjectURL(scanned.blob);
+    return {
+      detected: scanned.detected,
+      page: {
+        id: uid(),
+        sourceUrl,
+        sourceBlob,
+        resultUrl,
+        resultBlob: scanned.blob,
+        corners: scanned.corners,
+        filter: scanned.filter,
+        width: scanned.width,
+        height: scanned.height,
+      },
+    };
+  } catch (err) {
+    revoke(sourceUrl);
+    revoke(resultUrl);
+    throw err;
+  }
+}
+
 export const useScanner = create<ScannerState>((set, get) => ({
   title: defaultTitle(),
   pages: [],
@@ -95,9 +138,18 @@ export const useScanner = create<ScannerState>((set, get) => ({
   error: null,
   draftReady: false,
   draftHydrating: false,
+  draftDirty: false,
+  draftSaving: false,
+  draftError: null,
   setTitle: (title) => set({ title }),
   setCameraOpen: (cameraOpen) => set({ cameraOpen }),
   clearError: () => set({ error: null }),
+  retryDraft: () => {
+    const state = get();
+    if (!state.draftReady || state.draftSaving) return;
+    set({ draftError: null });
+    persistImmediately(state.title, state.pages);
+  },
 
   hydrateDraft: async () => {
     const state = get();
@@ -121,35 +173,28 @@ export const useScanner = create<ScannerState>((set, get) => ({
   },
 
   addFromCanvas: async (canvas, openEditor, progressLabel = "Preparing your page…") => {
+    if (get().processing) return;
     if (get().pages.length >= MAX_DOCUMENT_PAGES) {
       set({ error: `A document can contain up to ${MAX_DOCUMENT_PAGES} pages.` });
       return;
     }
     set({ processing: true, processingLabel: progressLabel, error: null });
     try {
-      const preparedCanvas = await canvasFromSource(canvas);
-      const [sourceBlob, scanned] = await Promise.all([
-        canvasToBlob(preparedCanvas, "image/jpeg", 0.9),
-        autoScan(preparedCanvas, "enhance"),
-      ]);
-      const sourceUrl = URL.createObjectURL(sourceBlob);
-      const resultUrl = URL.createObjectURL(scanned.blob);
-      const page: ScanPage = {
-        id: uid(),
-        sourceUrl,
-        sourceBlob,
-        resultUrl,
-        resultBlob: scanned.blob,
-        corners: scanned.corners,
-        filter: scanned.filter,
-        width: scanned.width,
-        height: scanned.height,
-      };
+      const { page, detected } = await prepareAutoPage(canvas);
+      if (get().pages.length >= MAX_DOCUMENT_PAGES) {
+        revokePage(page);
+        set({
+          processing: false,
+          processingLabel: "",
+          error: `A document can contain up to ${MAX_DOCUMENT_PAGES} pages.`,
+        });
+        return;
+      }
       set((s) => ({
         pages: [...s.pages, page],
         processing: false,
         processingLabel: "",
-        error: scanned.detected
+        error: detected
           ? null
           : "Page edges weren’t clear, so a safe crop was used. Review the crop before exporting.",
       }));
@@ -165,14 +210,32 @@ export const useScanner = create<ScannerState>((set, get) => ({
   },
 
   addFromBlob: async (blob, openEditor) => {
+    if (get().processing) return;
     if (blob.size > MAX_IMAGE_INPUT_BYTES) {
       set({ error: "That image is too large. Choose an image smaller than 25 MB." });
       return;
     }
     set({ processing: true, processingLabel: "Scanning your photo…", error: null });
     try {
-      const canvas = await canvasFromSource(blob);
-      await get().addFromCanvas(canvas, openEditor, "Scanning your photo…");
+      const { page, detected } = await prepareAutoPage(blob);
+      if (get().pages.length >= MAX_DOCUMENT_PAGES) {
+        revokePage(page);
+        set({
+          processing: false,
+          processingLabel: "",
+          error: `A document can contain up to ${MAX_DOCUMENT_PAGES} pages.`,
+        });
+        return;
+      }
+      set((state) => ({
+        pages: [...state.pages, page],
+        processing: false,
+        processingLabel: "",
+        error: detected
+          ? null
+          : "Page edges weren't clear, so a safe crop was used. Review the crop before exporting.",
+      }));
+      if (openEditor) get().openEditor(page);
     } catch (err) {
       set({
         processing: false,
@@ -186,6 +249,7 @@ export const useScanner = create<ScannerState>((set, get) => ({
   },
 
   addImageBatch: async (blobs) => {
+    if (get().processing) return;
     if (blobs.length === 0) return;
     if (get().pages.length + blobs.length > MAX_DOCUMENT_PAGES) {
       set({ error: `A document can contain up to ${MAX_DOCUMENT_PAGES} pages.` });
@@ -201,23 +265,18 @@ export const useScanner = create<ScannerState>((set, get) => ({
     try {
       for (let index = 0; index < blobs.length; index++) {
         set({ processingLabel: `Scanning photo ${index + 1} of ${blobs.length}…` });
-        const canvas = await canvasFromSource(blobs[index]!);
-        const [sourceBlob, scanned] = await Promise.all([
-          canvasToBlob(canvas, "image/jpeg", 0.9),
-          autoScan(canvas, "enhance"),
-        ]);
-        needsCropReview ||= !scanned.detected;
-        prepared.push({
-          id: uid(),
-          sourceUrl: URL.createObjectURL(sourceBlob),
-          sourceBlob,
-          resultUrl: URL.createObjectURL(scanned.blob),
-          resultBlob: scanned.blob,
-          corners: scanned.corners,
-          filter: scanned.filter,
-          width: scanned.width,
-          height: scanned.height,
+        const result = await prepareAutoPage(blobs[index]!);
+        needsCropReview ||= !result.detected;
+        prepared.push(result.page);
+      }
+      if (get().pages.length + prepared.length > MAX_DOCUMENT_PAGES) {
+        for (const page of prepared) revokePage(page);
+        set({
+          processing: false,
+          processingLabel: "",
+          error: `A document can contain up to ${MAX_DOCUMENT_PAGES} pages.`,
         });
+        return;
       }
       set((state) => ({
         pages: [...state.pages, ...prepared],
@@ -228,10 +287,7 @@ export const useScanner = create<ScannerState>((set, get) => ({
           : null,
       }));
     } catch (err) {
-      for (const page of prepared) {
-        revoke(page.sourceUrl);
-        revoke(page.resultUrl);
-      }
+      for (const page of prepared) revokePage(page);
       set({
         processing: false,
         processingLabel: "",
@@ -244,6 +300,7 @@ export const useScanner = create<ScannerState>((set, get) => ({
   },
 
   addPdfFile: async (file, processPages) => {
+    if (get().processing) return;
     const availablePages = MAX_DOCUMENT_PAGES - get().pages.length;
     if (availablePages <= 0) {
       set({ error: `A document can contain up to ${MAX_DOCUMENT_PAGES} pages.` });
@@ -253,7 +310,7 @@ export const useScanner = create<ScannerState>((set, get) => ({
     const prepared: ScanPage[] = [];
     try {
       const processPdfPages = processPages ?? (await import("./pdf")).processPdfPages;
-      const pageCount = await processPdfPages(file, async (canvas, pageNumber, total) => {
+      const result = await processPdfPages(file, async (canvas, pageNumber, total) => {
         set({ processingLabel: `Preparing page ${pageNumber} of ${total}…` });
         const full: Quad = defaultCorners();
         const [sourceBlob, scanned] = await Promise.all([
@@ -282,18 +339,21 @@ export const useScanner = create<ScannerState>((set, get) => ({
           throw err;
         }
       }, availablePages);
-      if (pageCount === 0) throw new Error("No pages found in that PDF.");
-      if (pageCount !== prepared.length) throw new Error("The PDF import was incomplete.");
+      if (result.importedPages === 0) throw new Error("No pages found in that PDF.");
+      if (result.importedPages !== prepared.length) throw new Error("The PDF import was incomplete.");
+      if (get().pages.length + prepared.length > MAX_DOCUMENT_PAGES) {
+        throw new Error(`A document can contain up to ${MAX_DOCUMENT_PAGES} pages.`);
+      }
       set((state) => ({
         pages: [...state.pages, ...prepared],
         processing: false,
         processingLabel: "",
+        error: result.truncated
+          ? `Imported ${result.importedPages} of ${result.totalPages} PDF pages because a document can contain up to ${MAX_DOCUMENT_PAGES} pages.`
+          : null,
       }));
     } catch (err) {
-      for (const page of prepared) {
-        revoke(page.sourceUrl);
-        revoke(page.resultUrl);
-      }
+      for (const page of prepared) revokePage(page);
       set({
         processing: false,
         processingLabel: "",
@@ -323,6 +383,7 @@ export const useScanner = create<ScannerState>((set, get) => ({
   },
 
   openNewEditor: async (canvas) => {
+    if (get().processing) return;
     if (get().pages.length >= MAX_DOCUMENT_PAGES) {
       set({ error: `A document can contain up to ${MAX_DOCUMENT_PAGES} pages.` });
       return;
@@ -560,24 +621,41 @@ export const useScanner = create<ScannerState>((set, get) => ({
       cameraOpen: false,
       error: null,
     });
-    persistImmediately(title, []);
   },
 }));
 
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
 let persistQueue = Promise.resolve();
+let draftRevision = 0;
 
-function enqueueDraft(title: string, pages: ScanPage[]) {
+function enqueueDraft(title: string, pages: ScanPage[], revision: number) {
+  if (revision === draftRevision) {
+    useScanner.setState({ draftSaving: true, draftError: null });
+  }
   persistQueue = persistQueue
     .catch(() => undefined)
     .then(() => saveDraft(title, pages))
-    .catch((err) => console.warn("Could not save the draft", err));
+    .then(() => {
+      if (revision === draftRevision) {
+        useScanner.setState({ draftDirty: false, draftSaving: false, draftError: null });
+      }
+    })
+    .catch((err) => {
+      console.warn("Could not save the draft", err);
+      if (revision === draftRevision) {
+        useScanner.setState({
+          draftDirty: true,
+          draftSaving: false,
+          draftError: "Changes aren't saved on this device. Free some storage, then retry.",
+        });
+      }
+    });
 }
 
 function persistImmediately(title: string, pages: ScanPage[]) {
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = undefined;
-  enqueueDraft(title, pages);
+  enqueueDraft(title, pages, draftRevision);
 }
 
 useScanner.subscribe((state, previous) => {
@@ -585,6 +663,10 @@ useScanner.subscribe((state, previous) => {
   const contentChanged = state.title !== previous.title || state.pages !== previous.pages;
   const processingFinished = previous.processing && !state.processing;
   if (!contentChanged && !processingFinished) return;
+  if (contentChanged) {
+    draftRevision += 1;
+    useScanner.setState({ draftDirty: true, draftError: null });
+  }
   if (persistTimer) clearTimeout(persistTimer);
   // During a multi-page import, wait until scanning finishes instead of
   // rewriting the complete (and growing) blob collection after every page.
@@ -592,16 +674,26 @@ useScanner.subscribe((state, previous) => {
     persistTimer = undefined;
     return;
   }
+  if (state.pages !== previous.pages || processingFinished) {
+    persistImmediately(state.title, state.pages);
+    return;
+  }
   persistTimer = setTimeout(() => {
     persistTimer = undefined;
     const current = useScanner.getState();
-    enqueueDraft(current.title, current.pages);
+    enqueueDraft(current.title, current.pages, draftRevision);
   }, 300);
 });
 
 if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", () => {
+  const flushDirtyDraft = () => {
     const current = useScanner.getState();
-    if (current.draftReady) persistImmediately(current.title, current.pages);
+    if (current.draftReady && current.draftDirty) {
+      persistImmediately(current.title, current.pages);
+    }
+  };
+  window.addEventListener("pagehide", flushDirtyDraft);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushDirtyDraft();
   });
 }

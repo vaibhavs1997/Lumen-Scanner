@@ -3,6 +3,7 @@ Lumen for Google Play
 
 Package name: app.lumen.scanner
 Version: 1.0.0 (versionCode 1)
+Target SDK: Android 16 (API level 36)
 Upload key alias: lumen
 Keystore file: stored privately outside this project
 Keystore password: stored privately; never commit or document it here
@@ -59,15 +60,15 @@ used only on-device to create scans you save or share.
 Keep the private upload key and its password secure. Release builds read them
 from LUMEN_KEYSTORE_FILE, LUMEN_KEYSTORE_PASS, and LUMEN_KEY_PASS.
 
-Content rating
---------------
-Complete Google’s questionnaire. This app is a productivity scanner,
-not a social network, and does not share user content online.
+GitHub release workflow
+-----------------------
+The manual "Android release bundle" workflow builds the signed .aab after these
+repository secrets are configured:
 
-Data safety
------------
-No data is collected or shared by Lumen servers. Camera and files are
-used only on-device to create scans you save or share.
+  LUMEN_KEYSTORE_BASE64  Base64-encoded upload keystore
+  LUMEN_KEYSTORE_PASS    Keystore password
+  LUMEN_KEY_ALIAS        Key alias (optional; defaults to lumen)
+  LUMEN_KEY_PASS         Key password
 
-Keep the private upload key and its password secure. You need the same upload
-key for future updates unless Google Play approves an upload-key reset.
+The workflow keeps the decoded keystore in the runner's temporary directory and
+uploads app-release.aab as an artifact retained for seven days.

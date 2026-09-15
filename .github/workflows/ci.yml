@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: grok-workspace
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: grok-workspace/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - name: Scanner end-to-end smoke test
+        run: |
+          npm run dev >/tmp/lumen-dev.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:8080/; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              cat /tmp/lumen-dev.log
+              exit 1
+            fi
+            sleep 1
+          done
+          npm run test:e2e -- http://127.0.0.1:8080/
+      - run: chmod +x android/gradlew
+      - run: >-
+          android/gradlew --no-daemon
+          :app:testDebugUnitTest
+          :app:lintDebug :app:lintRelease :app:assembleDebug
+      - name: Verify Play target SDK
+        run: |
+          target_sdk=$(sed -n 's/^[[:space:]]*targetSdk = \([0-9][0-9]*\)$/\1/p' android/app/build.gradle)
+          test "$target_sdk" = "36"

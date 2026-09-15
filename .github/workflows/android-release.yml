@@ -1,0 +1,58 @@
+name: Android release bundle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: grok-workspace
+    env:
+      LUMEN_KEYSTORE_BASE64: ${{ secrets.LUMEN_KEYSTORE_BASE64 }}
+      LUMEN_KEYSTORE_PASS: ${{ secrets.LUMEN_KEYSTORE_PASS }}
+      LUMEN_KEY_ALIAS: ${{ secrets.LUMEN_KEY_ALIAS }}
+      LUMEN_KEY_PASS: ${{ secrets.LUMEN_KEY_PASS }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: grok-workspace/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+
+      - name: Validate signing secrets
+        run: |
+          test -n "$LUMEN_KEYSTORE_BASE64" || { echo "Missing LUMEN_KEYSTORE_BASE64"; exit 1; }
+          test -n "$LUMEN_KEYSTORE_PASS" || { echo "Missing LUMEN_KEYSTORE_PASS"; exit 1; }
+          test -n "$LUMEN_KEY_PASS" || { echo "Missing LUMEN_KEY_PASS"; exit 1; }
+
+      - name: Build signed app bundle
+        env:
+          LUMEN_KEYSTORE_FILE: ${{ runner.temp }}/lumen-upload.jks
+        run: |
+          printf '%s' "$LUMEN_KEYSTORE_BASE64" | base64 --decode > "$LUMEN_KEYSTORE_FILE"
+          chmod +x android/gradlew
+          android/gradlew --no-daemon :app:bundleRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lumen-release-aab
+          path: grok-workspace/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 7

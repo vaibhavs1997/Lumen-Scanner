@@ -54,3 +54,22 @@ test("warps a skewed page into an opaque, bounded output", () => {
     restore();
   }
 });
+
+test("rejects crossed crop corners instead of silently exporting a fallback", () => {
+  const restore = installCanvasEnvironment();
+  try {
+    const source = makeCanvas(40, 40);
+    const crossed: Quad = [
+      { x: 4, y: 4 },
+      { x: 36, y: 36 },
+      { x: 36, y: 4 },
+      { x: 4, y: 36 },
+    ];
+    assert.throws(
+      () => warpPerspective(source as unknown as HTMLCanvasElement, crossed),
+      /non-overlapping page area/,
+    );
+  } finally {
+    restore();
+  }
+});

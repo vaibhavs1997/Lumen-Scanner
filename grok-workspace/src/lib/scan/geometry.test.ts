@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { homography, invert3x3, orderCorners, outputSize } from "./geometry.ts";
+import {
+  homography,
+  invert3x3,
+  isValidNormalizedQuad,
+  orderCorners,
+  outputSize,
+} from "./geometry.ts";
 import type { Point, Quad } from "./types.ts";
 
 function project(matrix: Float64Array, point: Point): Point {
@@ -73,4 +79,34 @@ test("homography rejects a degenerate source and output sizing respects its cap"
     { x: 0, y: 2400 },
   ];
   assert.deepEqual(outputSize(large, 1600), { width: 1600, height: 1200 });
+});
+
+test("validates crop ordering, convexity, edge length, and minimum area", () => {
+  assert.equal(
+    isValidNormalizedQuad([
+      { x: 0.1, y: 0.1 },
+      { x: 0.9, y: 0.12 },
+      { x: 0.85, y: 0.9 },
+      { x: 0.12, y: 0.85 },
+    ]),
+    true,
+  );
+  assert.equal(
+    isValidNormalizedQuad([
+      { x: 0.1, y: 0.1 },
+      { x: 0.9, y: 0.9 },
+      { x: 0.9, y: 0.1 },
+      { x: 0.1, y: 0.9 },
+    ]),
+    false,
+  );
+  assert.equal(
+    isValidNormalizedQuad([
+      { x: 0.1, y: 0.1 },
+      { x: 0.11, y: 0.1 },
+      { x: 0.11, y: 0.11 },
+      { x: 0.1, y: 0.11 },
+    ]),
+    false,
+  );
 });

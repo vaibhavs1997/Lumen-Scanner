@@ -1,5 +1,5 @@
 import type { Quad } from "./types.ts";
-import { homography, invert3x3, outputSize } from "./geometry.ts";
+import { homography, invert3x3, isValidNormalizedQuad, outputSize } from "./geometry.ts";
 
 export function warpPerspective(
   source: HTMLCanvasElement,
@@ -10,6 +10,10 @@ export function warpPerspective(
   if (!srcCtx) throw new Error("Canvas unsupported");
   const sw = source.width;
   const sh = source.height;
+  const normalized = corners.map(({ x, y }) => ({ x: x / sw, y: y / sh })) as Quad;
+  if (!isValidNormalizedQuad(normalized)) {
+    throw new Error("Crop corners must form a clear, non-overlapping page area.");
+  }
   const { width, height } = outputSize(corners, maxEdge);
 
   // The common path for PDFs and fallback edge detection is an axis-aligned
@@ -48,13 +52,7 @@ export function warpPerspective(
     { x: 0, y: height - 1 },
   ];
   const H = homography(dst, corners) ?? invert3x3(homography(corners, dst) ?? new Float64Array(9));
-  if (!H) {
-    const copy = document.createElement("canvas");
-    copy.width = sw;
-    copy.height = sh;
-    copy.getContext("2d")?.drawImage(source, 0, 0);
-    return copy;
-  }
+  if (!H) throw new Error("Crop corners could not be transformed.");
 
   const out = document.createElement("canvas");
   out.width = width;

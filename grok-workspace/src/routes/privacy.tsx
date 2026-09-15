@@ -25,10 +25,7 @@ function Privacy() {
           If you install the Android app from Google Play, files you save are written to Downloads
           on that device. Sharing uses the Android share sheet you pick.
         </p>
-        <p>
-          The website may load fonts from Google Fonts. That is a third-party service with its own
-          policy.
-        </p>
+        <p>Lumen’s interface fonts are packaged with the app and are not fetched from a font service.</p>
         <p>Questions about this policy can be sent by the listing contact on Google Play.</p>
       </div>
     </main>

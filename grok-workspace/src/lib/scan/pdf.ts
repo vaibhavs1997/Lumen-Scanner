@@ -10,6 +10,12 @@ export type PdfPageProcessor = (
   pageCount: number,
 ) => Promise<void>;
 
+export type PdfImportResult = {
+  importedPages: number;
+  totalPages: number;
+  truncated: boolean;
+};
+
 let pdfjsPromise: Promise<PdfJsModule> | null = null;
 
 async function loadPdfjs(): Promise<PdfJsModule> {
@@ -32,7 +38,7 @@ export async function processPdfPages(
   file: File,
   processPage: PdfPageProcessor,
   maxPages = MAX_DOCUMENT_PAGES,
-): Promise<number> {
+): Promise<PdfImportResult> {
   if (file.size > MAX_PDF_INPUT_BYTES) {
     throw new Error("That PDF is too large. Choose a file smaller than 75 MB.");
   }
@@ -55,7 +61,7 @@ export async function processLoadedPdfPages(
   pdf: PdfDocument,
   processPage: PdfPageProcessor,
   maxPages = MAX_DOCUMENT_PAGES,
-): Promise<number> {
+): Promise<PdfImportResult> {
   const pageCount = Math.min(pdf.numPages, Math.max(0, maxPages));
   for (let i = 1; i <= pageCount; i++) {
     const page = await pdf.getPage(i);
@@ -76,7 +82,11 @@ export async function processLoadedPdfPages(
       canvas.height = 1;
     }
   }
-  return pageCount;
+  return {
+    importedPages: pageCount,
+    totalPages: pdf.numPages,
+    truncated: pageCount < pdf.numPages,
+  };
 }
 
 export async function canvasesToPdf(
